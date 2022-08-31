@@ -20,8 +20,10 @@ LRUReplacer::~LRUReplacer() = default;
 
 bool LRUReplacer::Victim(frame_id_t *frame_id) { 
     std::lock_guard<std::mutex> lock(m_);
-    if (lru_.empty())
+    if (lru_.empty()) {
+        *frame_id = INVALID_PAGE_ID;
         return false;
+    }
     else {
         *frame_id = lru_.front();
         lru_.pop_front();
@@ -40,8 +42,6 @@ void LRUReplacer::Unpin(frame_id_t frame_id) {
         if (frame_id == id) 
             return;
     }
-    if (lru_.size() == lru_limit_) 
-        lru_.pop_front();
     lru_.push_back(frame_id);  
 }
 

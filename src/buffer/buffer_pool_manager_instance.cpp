@@ -53,6 +53,7 @@ bool BufferPoolManagerInstance::FlushPgImp(page_id_t page_id) {
     auto frame_id = page_table_[page_id];
     auto& page = pages_[frame_id];
     disk_manager_->WritePage(page_id, page.data_);
+    page.is_dirty_ = false;
     return true;
   }
   return false;
@@ -64,6 +65,7 @@ void BufferPoolManagerInstance::FlushAllPgsImp() {
     auto page_id = p.first;
     auto frame_id = p.second;
     auto& page = pages_[frame_id];
+    page.is_dirty_ = false;
     disk_manager_->WritePage(page_id, page.data_);
   }
 }
@@ -193,9 +195,6 @@ bool BufferPoolManagerInstance::UnpinPgImp(page_id_t page_id, bool is_dirty) {
   page.is_dirty_ = is_dirty;
   if (page.pin_count_ == 0) {
     replacer_->Unpin(frame_id);
-    if (page.is_dirty_) {
-      FlushPgImp(page.page_id_);
-    }   
   } 
   return true;
 }
