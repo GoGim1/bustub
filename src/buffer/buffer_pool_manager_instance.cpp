@@ -49,7 +49,12 @@ BufferPoolManagerInstance::~BufferPoolManagerInstance() {
 
 bool BufferPoolManagerInstance::FlushPgImp(page_id_t page_id) {
   // Make sure you call DiskManager::WritePage!
-  if (page_table_.find(page_id) != page_table_.end()) {
+  std::lock_guard<std::mutex> lock(latch_);
+  return FlushPgImpUnsafe(page_id);
+}
+
+bool BufferPoolManagerInstance::FlushPgImpUnsafe(page_id_t page_id) {
+ if (page_table_.find(page_id) != page_table_.end()) {
     auto frame_id = page_table_[page_id];
     auto& page = pages_[frame_id];
     disk_manager_->WritePage(page_id, page.data_);
@@ -61,6 +66,7 @@ bool BufferPoolManagerInstance::FlushPgImp(page_id_t page_id) {
 
 void BufferPoolManagerInstance::FlushAllPgsImp() {
   // You can do it!
+  std::lock_guard<std::mutex> lock(latch_);
   for (auto p: page_table_) {
     auto page_id = p.first;
     auto frame_id = p.second;
@@ -76,15 +82,7 @@ Page *BufferPoolManagerInstance::NewPgImp(page_id_t *page_id) {
   // 2.   Pick a victim page P from either the free list or the replacer. Always pick from the free list first.
   // 3.   Update P's metadata, zero out memory and add P to the page table.
   // 4.   Set the page ID output parameter. Return a pointer to P.
-  bool all_pages_pinned = true;
-  for (size_t i = 0; i < pool_size_; i++) {
-    auto& page = pages_[i];
-    if (page.page_id_ == INVALID_PAGE_ID || page.pin_count_ == 0) {
-      all_pages_pinned = false;
-      break;
-    }
-  }
-  if (all_pages_pinned) return nullptr;
+  std::lock_guard<std::mutex> lock(latch_);
 
   frame_id_t frame_id;
   if (!free_list_.empty()) {
@@ -92,16 +90,18 @@ Page *BufferPoolManagerInstance::NewPgImp(page_id_t *page_id) {
     free_list_.pop_front();
   }
   else {
-    if (!replacer_->Victim(&frame_id))
+    if (!replacer_->Victim(&frame_id)) {
+      *page_id = INVALID_PAGE_ID;
       return nullptr;
+    }
   }
 
   auto& page = pages_[frame_id];
   if (page.page_id_ != INVALID_PAGE_ID) {
-    page_table_.erase(page.page_id_);
     if (page.is_dirty_) {
-      FlushPgImp(page.page_id_);
+      FlushPgImpUnsafe(page.page_id_);
     }
+    page_table_.erase(page.page_id_);
   }
   page.page_id_ = AllocatePage();
   page.is_dirty_ = false;
@@ -123,8 +123,12 @@ Page *BufferPoolManagerInstance::FetchPgImp(page_id_t page_id) {
   // 2.     If R is dirty, write it back to the disk.
   // 3.     Delete R from the page table and insert P.
   // 4.     Update P's metadata, read in the page content from disk, and then return a pointer to P.
-  if (page_table_.find(page_id) != page_table_.end()) 
-    return &pages_[page_table_[page_id]];
+  std::lock_guard<std::mutex> lock(latch_);
+  if (page_table_.find(page_id) != page_table_.end()) {
+    auto& page = pages_[page_table_[page_id]];
+    page.pin_count_++;
+    return &page;
+  }
   
   frame_id_t frame_id;
   if (!free_list_.empty()) {
@@ -138,10 +142,10 @@ Page *BufferPoolManagerInstance::FetchPgImp(page_id_t page_id) {
   
   auto& page = pages_[frame_id];
   if (page.page_id_ != INVALID_PAGE_ID) {
-    page_table_.erase(page.page_id_);
     if (page.is_dirty_) {
-      FlushPgImp(page.page_id_);
+      FlushPgImpUnsafe(page.page_id_);
     }
+    page_table_.erase(page.page_id_);
   }
  
   page.page_id_ = page_id;
@@ -162,7 +166,7 @@ bool BufferPoolManagerInstance::DeletePgImp(page_id_t page_id) {
   // 1.   If P does not exist, return true.
   // 2.   If P exists, but has a non-zero pin-count, return false. Someone is using the page.
   // 3.   Otherwise, P can be deleted. Remove P from the page table, reset its metadata and return it to the free list.
-  
+  std::lock_guard<std::mutex> lock(latch_);
   if (page_table_.find(page_id) == page_table_.end()) 
     return true;
   
@@ -183,6 +187,7 @@ bool BufferPoolManagerInstance::DeletePgImp(page_id_t page_id) {
 }
 
 bool BufferPoolManagerInstance::UnpinPgImp(page_id_t page_id, bool is_dirty) { 
+  std::lock_guard<std::mutex> lock(latch_);
   if (page_table_.find(page_id) == page_table_.end()) 
     return false;
   auto frame_id = page_table_[page_id];
@@ -192,7 +197,9 @@ bool BufferPoolManagerInstance::UnpinPgImp(page_id_t page_id, bool is_dirty) {
     return false;
 
   page.pin_count_--;
-  page.is_dirty_ = is_dirty;
+  if (is_dirty) {
+    page.is_dirty_ = is_dirty;
+  }
   if (page.pin_count_ == 0) {
     replacer_->Unpin(frame_id);
   } 

@@ -80,6 +80,7 @@ class BufferPoolManagerInstance : public BufferPoolManager {
    * @return false if the page could not be found in the page table, true otherwise
    */
   bool FlushPgImp(page_id_t page_id) override;
+  bool FlushPgImpUnsafe(page_id_t page_id);
 
   /**
    * Creates a new page in the buffer pool.
