@@ -17,6 +17,8 @@
 #include "storage/disk/disk_manager.h"
 #include "storage/page/page.h"
 
+#include <vector>
+
 namespace bustub {
 
 class ParallelBufferPoolManager : public BufferPoolManager {
@@ -86,5 +88,8 @@ class ParallelBufferPoolManager : public BufferPoolManager {
    * Flushes all the pages in the buffer pool to disk.
    */
   void FlushAllPgsImp() override;
+
+  std::vector<BufferPoolManager*> bpms_;
+  size_t last_index;
 };
 }  // namespace bustub

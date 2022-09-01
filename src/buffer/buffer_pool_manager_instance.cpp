@@ -125,8 +125,10 @@ Page *BufferPoolManagerInstance::FetchPgImp(page_id_t page_id) {
   // 4.     Update P's metadata, read in the page content from disk, and then return a pointer to P.
   std::lock_guard<std::mutex> lock(latch_);
   if (page_table_.find(page_id) != page_table_.end()) {
-    auto& page = pages_[page_table_[page_id]];
+    auto frame_id = page_table_[page_id];
+    auto& page = pages_[frame_id];
     page.pin_count_++;
+    replacer_->Pin(frame_id);
     return &page;
   }
   
